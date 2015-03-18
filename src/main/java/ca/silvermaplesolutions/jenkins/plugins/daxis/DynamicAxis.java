@@ -24,6 +24,10 @@ import org.kohsuke.stapler.StaplerRequest;
 
 import com.google.common.collect.Lists;
 import hudson.Util;
+import java.util.Arrays;
+import java.util.logging.Level;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
 
 /**
  * Implements dynamic axis support through a configurable environment variable.
@@ -34,8 +38,8 @@ public class DynamicAxis extends Axis
 {
 	private static final Logger LOGGER = Logger.getLogger( DynamicAxis.class.getName() );
 
-	private String varName = "";
-	private List<String> axisValues = Lists.newArrayList();
+	private @CheckForNull String varName = "";
+	private final @Nonnull List<String> axisValues = Lists.newArrayList();
 
 	/**
 	 * Always construct from an axis name and environment variable name.
@@ -51,9 +55,10 @@ public class DynamicAxis extends Axis
 
 	/**
 	 * An accessor is required if referenced in the Jelly file.
-	 * @return the name of the variable
+	 * @return Name of the variable. Null values will be replaced 
+         * by empty strings.
 	 */
-	public synchronized String getVarName()
+	public synchronized @Nonnull String getVarName()
 	{
 		return varName == null ? "" : varName;
 	}
@@ -66,6 +71,7 @@ public class DynamicAxis extends Axis
 	{
 		if( axisValues.isEmpty() )
 		{
+			LOGGER.fine( "Axis values list is empty. Adding 'default' value" );    
 			axisValues.add( "default" );
 		}
 	}
@@ -74,9 +80,11 @@ public class DynamicAxis extends Axis
 	 * Overridden to provide a default value in the event the target environment
 	 * variable cannot be accessed or interpreted.
 	 * @see hudson.matrix.Axis#getValues()
+         * @return Cached list of axis values from the last 
+         * {@link #rebuild(hudson.matrix.MatrixBuild.MatrixBuildExecution)} call
 	 */
 	@Override
-	public synchronized List<String> getValues()
+	public synchronized @Nonnull List<String> getValues()
 	{
 		checkForDefaultValues();
 		return axisValues;
@@ -85,56 +93,58 @@ public class DynamicAxis extends Axis
 	/**
 	 * Overridden to return our environment variable name.
 	 * @see hudson.matrix.Axis#getValueString()
+         * @return Name of the variable. Null values will be replaced 
+         * by empty strings.
 	 */
 	@Override
-	public synchronized String getValueString()
+	public synchronized @Nonnull String getValueString()
 	{
 		return getVarName();
 	}
-
+	
 	/**
 	 * Override the new rebuild() feature to dynamically evaluate the configured
 	 * environment variable name to get list of axis values to use for the
 	 * current build.
 	 * @see hudson.matrix.Axis#rebuild(hudson.matrix.MatrixBuild.MatrixBuildExecution)
+	 * @return New list of axis values
 	 */
 	@Override
-	public synchronized List<String> rebuild( MatrixBuild.MatrixBuildExecution context )
+	public synchronized @Nonnull List<String> rebuild( @Nonnull MatrixBuild.MatrixBuildExecution context )
 	{
 		// clear any existing values to ensure we do not return old ones
-		LOGGER.fine( "Rebuilding axis names from variable '" + varName + "'" );
-		axisValues.clear();
-		if( context != null )
+		LOGGER.log( Level.FINE, "Rebuilding axis names from variable ''{0}''", varName);
+		final List<String> newAxisValues = new ArrayList<String>(axisValues.size()); 
+		try
 		{
-			try
+			// attempt to get the current environment variables
+			final @Nonnull EnvVars vars = context.getBuild().getEnvironment( TaskListener.NULL );
+			
+			// only spaces are supported as separators, as per the original axis value definition
+			String varValue = vars.get( varName );
+			if( varValue != null )
 			{
-				// attempt to get the current environment variables
-				EnvVars vars = context.getBuild().getEnvironment( TaskListener.NULL );
-				if( vars != null )
-				{
-					// only spaces are supported as separators, as per the original axis value definition
-					String varValue = vars.get( varName );
-					if( varValue != null )
-					{
-						LOGGER.fine( "Variable value is '" + varValue + "'" );
-						for( String item : Util.tokenize(varValue) )
-						{
-							axisValues.add( item );
-						}
-					}
-				}
+				LOGGER.log( Level.FINE, "Variable value is ''{0}''", varValue);
+				newAxisValues.addAll(Arrays.asList(Util.tokenize(varValue)));
 			}
-			catch( Exception e )
-			{
-				LOGGER.severe( "Failed to build list of names: " + e );
-			}
+		}
+		catch( Exception e )
+		{
+			LOGGER.log( Level.SEVERE, "Failed to build list of names: {0}", e);
 		}
 
 		// validate result list before returning it
-		checkForDefaultValues();
-		LOGGER.fine( "Returning axis list " + axisValues );
-        // must return a new object because axisValues might change
-		return new ArrayList<String>(axisValues);
+		if (newAxisValues.isEmpty()) {
+			LOGGER.fine( "Axis values list is empty. Adding 'default' value" );    
+			newAxisValues.add( "default" );
+		}
+		LOGGER.log( Level.FINE, "Returning axis list {0}", newAxisValues);
+		
+		// Add values to the cache
+		axisValues.clear();
+		axisValues.addAll(newAxisValues);
+		
+		return newAxisValues;
 	}
 
 	/**
