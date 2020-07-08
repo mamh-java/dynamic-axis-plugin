@@ -10,7 +10,7 @@
 
     <artifactId>dynamic-axis</artifactId>
     <name>Dynamic Axis</name>
-    <version>1.0.4-SNAPSHOT</version>
+    <version>1.0.4</version>
     <packaging>hpi</packaging>
     <url>https://github.com/mamh-java/dynamic-axis-plugin.git</url>
     <description>Define a matrix build axis with values dynamically populated from an environment variable at build
